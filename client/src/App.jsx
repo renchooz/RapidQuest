@@ -2,15 +2,17 @@ import React, { useState, useEffect } from "react";
 import api from "./api/axios";
 import ConversationsList from "./components/ConversationsList";
 import ChatWindow from "./components/ChatWindow";
-import { Menu, ArrowLeft } from "lucide-react";
+import { Menu } from "lucide-react";
 
 export default function App() {
   const [conversations, setConversations] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(window.innerWidth >= 768);
+  const [loading, setLoading] = useState(false);
   const [currentUserId] = useState("918329446654");
 
   const fetchConversations = async () => {
+    setLoading(true);
     try {
       const { data } = await api.get("/messages/conversations", {
         params: { currentUserId },
@@ -18,6 +20,8 @@ export default function App() {
       setConversations(data);
     } catch (err) {
       console.error("Error fetching conversations:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -36,13 +40,11 @@ export default function App() {
 
     window.addEventListener("resize", handleResize);
     handleResize();
-
     return () => window.removeEventListener("resize", handleResize);
   }, [activeChat]);
 
   const openSidebar = () => setSidebarVisible(true);
   const closeSidebar = () => setSidebarVisible(false);
-
   const handleBack = () => {
     setActiveChat(null);
     setSidebarVisible(true);
@@ -50,6 +52,13 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden relative">
+      {/* Loader overlay */}
+      {loading && (
+        <div className="absolute inset-0 flex justify-center items-center bg-black bg-opacity-20 z-50">
+          <div className="w-10 h-10 border-4 border-blue-500 border-dashed rounded-full animate-spin"></div>
+        </div>
+      )}
+
       {/* Hamburger menu button for mobile */}
       {!sidebarVisible && (
         <button
