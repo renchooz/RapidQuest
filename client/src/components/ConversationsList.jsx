@@ -27,14 +27,14 @@ export default function ConversationsList({ conversations = [], onSelectChat }) 
             onClick={() => onSelectChat(conv)}
             className="flex items-center gap-4 p-3 cursor-pointer hover:bg-gray-100 transition rounded-r-lg"
           >
-            {/* Avatar */}
+            
             <div className="relative w-14 h-14 flex-shrink-0 rounded-full bg-green-500 text-white flex items-center justify-center text-xl font-semibold shadow-md overflow-hidden">
              
               {avatarLetter}
             
             </div>
 
-            {/* Chat info */}
+           
             <div className="flex-1 border-b border-gray-200 pb-3">
               <div className="flex justify-between items-center mb-1">
                 <span className="font-semibold text-gray-900 truncate max-w-[70%]">

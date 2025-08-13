@@ -1,19 +1,78 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ArrowLeft } from "lucide-react";
 import api from "../api/axios";
+import { io } from "socket.io-client";
+
+
+const SOCKET_URL ="https://rapidquest-1sx1.onrender.com";
 
 export default function ChatWindow({ contact, currentUserId, refreshConversations, onBack }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const messagesEndRef = useRef(null);
   const [loading, setLoading] = useState(false);
+  const socketRef = useRef(null);
+
+
+  const formatTime = (ts) => {
+    if (!ts && ts !== 0) return "";
+   
+    if (typeof ts === "string" && isNaN(Number(ts))) {
+      const d = new Date(ts);
+      return isNaN(d.getTime())
+        ? ""
+        : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+ 
+    const n = Number(ts);
+    const ms = n < 1e12 ? n * 1000 : n; 
+    const d = new Date(ms);
+    return isNaN(d.getTime())
+      ? ""
+      : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // init socket once
+  useEffect(() => {
+    if (!socketRef.current) {
+      socketRef.current = io(SOCKET_URL, { withCredentials: true });
+    }
+    const s = socketRef.current;
+
+    const onReceive = (msg) => {
+    
+      if (
+        (msg.from === contact.wa_id && msg.to === currentUserId) ||
+        (msg.from === currentUserId && msg.to === contact.wa_id)
+      ) {
+        setMessages((prev) => [...prev, msg]);
+      }
+    };
+
+    const onStatus = (update) => {
+      
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.messageId === update.messageId ? { ...m, status: update.status } : m
+        )
+      );
+    };
+
+    s.on("receive_message", onReceive);
+    s.on("message:status", onStatus);
+
+    return () => {
+      s.off("receive_message", onReceive);
+      s.off("message:status", onStatus);
+    };
+  }, [contact?.wa_id, currentUserId]);
 
   const fetchMessages = async () => {
     try {
       const { data } = await api.get(`/messages/${contact.wa_id}`, {
         params: { from: currentUserId },
       });
-      setMessages(data);
+      setMessages(data || []);
     } catch (err) {
       console.error("Error fetching messages:", err);
     }
@@ -22,15 +81,47 @@ export default function ChatWindow({ contact, currentUserId, refreshConversation
   const sendMessage = async () => {
     if (!text.trim() || loading) return;
     setLoading(true);
+    const textToSend = text.trim();
+    const now = Date.now();
 
     try {
-      await api.post(`/messages/${contact.wa_id}`, {
+      
+      const { data: saved } = await api.post(`/messages/${contact.wa_id}`, {
         from: currentUserId,
-        text: text.trim(),
+        text: textToSend,
       });
+
+      
+      const outgoing =
+        saved && (saved.messageId || saved._id)
+          ? {
+              ...saved,
+              messageId: saved.messageId || saved._id,
+              status: saved.status || "sent",
+              timestamp: saved.timestamp ?? now,
+              to: saved.to ?? contact.wa_id,
+              from: saved.from ?? currentUserId,
+              text: saved.text ?? textToSend,
+            }
+          : {
+              messageId: crypto?.randomUUID?.() || `${currentUserId}-${now}`,
+              from: currentUserId,
+              to: contact.wa_id,
+              text: textToSend,
+              timestamp: now, 
+              status: "sent", 
+            };
+
+      
+      setMessages((prev) => [...prev, outgoing]);
+
+      
+      socketRef.current?.emit("send_message", outgoing);
+
       setText("");
-      fetchMessages();
-      refreshConversations();
+      refreshConversations?.();
+
+      
     } catch (err) {
       console.error("Error sending message:", err);
     } finally {
@@ -47,17 +138,23 @@ export default function ChatWindow({ contact, currentUserId, refreshConversation
 
   useEffect(() => {
     fetchMessages();
-  }, [contact]);
+  }, [contact?.wa_id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const tickFor = (status) => {
+    if (status === "read") return "✓✓";
+    if (status === "delivered") return "✓✓";
+    if (status === "sent") return "✓";
+    return ""; 
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header */}
+      
       <div className="flex items-center p-4 border-b bg-gray-50">
-        {/* Back button for mobile */}
         {onBack && (
           <button
             onClick={onBack}
@@ -78,13 +175,13 @@ export default function ChatWindow({ contact, currentUserId, refreshConversation
         </div>
       </div>
 
-      {/* Messages */}
+     
       <div className="flex-1 p-4 overflow-y-auto scrollbar-hide bg-gray-100 space-y-2">
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           const isOwn = msg.from === currentUserId;
           return (
             <div
-              key={msg.messageId}
+              key={msg.messageId || `${index}-${msg.timestamp}`}
               className={`max-w-xs p-3 rounded-lg shadow ${
                 isOwn
                   ? "bg-green-500 text-white self-end ml-auto"
@@ -93,19 +190,8 @@ export default function ChatWindow({ contact, currentUserId, refreshConversation
             >
               <p className="whitespace-pre-wrap">{msg.text}</p>
               <div className="text-xs mt-1 flex justify-end items-center space-x-1">
-                <span>
-                  {new Date(Number(msg.timestamp) * 1000).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-                {isOwn && (
-                  <span>
-                    {msg.status === "sent" && "✓"}
-                    {msg.status === "delivered" && "✓✓"}
-                    {msg.status === "read" && "✓✓"}
-                  </span>
-                )}
+                <span>{formatTime(msg.timestamp)}</span>
+                {isOwn && <span>{tickFor(msg.status)}</span>}
               </div>
             </div>
           );
@@ -113,7 +199,7 @@ export default function ChatWindow({ contact, currentUserId, refreshConversation
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
+     
       <div className="p-4 border-t bg-white flex gap-2">
         <textarea
           rows={1}
